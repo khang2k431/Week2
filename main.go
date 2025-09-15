@@ -16,30 +16,35 @@ import (
 )
 
 func main() {
-	// load .env (nếu có)
+	// Load .env (if exists)
 	_ = godotenv.Load()
 
-	// init DB (Postgres if available, fallback to sqlite)
+	// Init DB (Postgres or fallback sqlite)
 	config.Init()
 
-	// auto-migrate models
-	if err := config.DB.AutoMigrate(&models.User{}, &models.Task{}); err != nil {
-		log.Fatal("migration failed:", err)
+	if config.DB == nil {
+		log.Fatal(" Database connection failed")
 	}
 
-	// create default admin if not exists
+	// Auto-migrate models
+	if err := config.DB.AutoMigrate(&models.User{}, &models.Task{}); err != nil {
+		log.Fatal(" Migration failed:", err)
+	}
+
+	// Create default admin if not exists
 	createAdminIfNotExist()
 
+	// setup gin 
 	r := gin.Default()
 
-	// global middlewares
+	// Global middlewares
 	r.Use(middlewares.RateLimitMiddleware())
 
-	// public
+	// Public routes
 	r.POST("/api/register", controllers.Register)
 	r.POST("/api/login", controllers.Login)
 
-	// protected routes
+	// Protected routes
 	auth := r.Group("/api")
 	auth.Use(middlewares.JWTAuthMiddleware())
 	{
@@ -50,30 +55,32 @@ func main() {
 		auth.DELETE("/tasks/:id", controllers.DeleteTask)
 	}
 
+	// Run server
 	port := os.Getenv("SERVER_PORT")
 	if port == "" {
 		port = "8080"
 	}
 	addr := fmt.Sprintf(":%s", port)
-	log.Printf("Server running on %s", addr)
-	if err := r.Run(addr); err != nil {
-		log.Fatal("server failed:", err)
-	}
-}
+	log.Printf(" Server running on %s", addr)
 
-func createAdminIfNotExist() {
-	var count int64
-	config.DB.Model(&models.User{}).Where("role = ?", "admin").Count(&count)
-	if count == 0 {
-		pwd := "admin123"
-		hashed, _ := bcrypt.GenerateFromPassword([]byte(pwd), bcrypt.DefaultCost)
-		admin := models.User{
-			Username: "admin",
-			Email:    "admin@example.com",
-			Password: string(hashed),
-			Role:     "admin",
+	if err := r.Run(addr); err != nil {
+		log.Fatal(" Server failed:", err)
+	}
+
+	// Create default admin account if not exists
+	func createAdminIfNotExist() {
+		var count int64
+		config.DB.Model(&models.User{}).Where("role = ?", "admin").Count(&count)
+		if count == 0 {
+			pwd := "admin123"
+			hashed, _ := bcrybt.GenerateFromPassword([]byte(pwd), bcrypt.DefaultCost)
+			admin := models.User{
+				Username: "admin",
+				Email:    "admin@example.com",
+				Password: string(hashed),
+				Role:     "admin",
 		}
 		config.DB.Create(&admin)
-		log.Printf("Created default admin: email=admin@example.com password=%s", pwd)
+		log.Prinln(" Created default admin account (email=admin@example.com, password=admin123)")
+		}
 	}
-}
