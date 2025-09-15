@@ -26,6 +26,7 @@ type updateTaskInput struct {
 	Completed   *bool   `json:"completed"`
 }
 
+// Create a new task
 func CreateTask(c *gin.Context) {
 	claims := c.MustGet("claims").(*utils.Claims)
 
@@ -52,6 +53,7 @@ func CreateTask(c *gin.Context) {
 		DueDate:     due,
 		OwnerID:     claims.UserID,
 	}
+
 	if err := config.DB.Create(&task).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not create task"})
 		return
@@ -59,11 +61,14 @@ func CreateTask(c *gin.Context) {
 	c.JSON(http.StatusCreated, task)
 }
 
+// List tasks with pagination + role check
 func ListTasks(c *gin.Context) {
+	claims := c.MustGet("claims").(*utils.Claims)
+
 	var tasks []models.Task
-	// simple pagination
 	page := 1
 	pageSize := 20
+
 	if p := c.Query("page"); p != "" {
 		if v, err := strconv.Atoi(p); err == nil && v > 0 {
 			page = v
@@ -74,20 +79,41 @@ func ListTasks(c *gin.Context) {
 			pageSize = v
 		}
 	}
-	config.DB.Preload("Owner").Limit(pageSize).Offset((page-1)*pageSize).Find(&tasks)
+
+	query := config.DB.Preload("Owner").Limit(pageSize).Offset((page - 1) * pageSize)
+
+	if claims.Role != "admin" {
+		query = query.Where("owner_id = ?", claims.UserID)
+	}
+
+	if err := query.Find(&tasks).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not fetch tasks"})
+		return
+	}
+
 	c.JSON(http.StatusOK, tasks)
 }
 
+// Get one task with access check
 func GetTask(c *gin.Context) {
+	claims := c.MustGet("claims").(*utils.Claims)
 	id := c.Param("id")
+
 	var task models.Task
 	if err := config.DB.Preload("Owner").First(&task, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
 		return
 	}
+
+	if claims.Role != "admin" && task.OwnerID != claims.UserID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "not allowed"})
+		return
+	}
+
 	c.JSON(http.StatusOK, task)
 }
 
+// Update task (admin or owner only)
 func UpdateTask(c *gin.Context) {
 	claims := c.MustGet("claims").(*utils.Claims)
 	id := c.Param("id")
@@ -97,7 +123,6 @@ func UpdateTask(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
 		return
 	}
-	// only admin or owner
 	if claims.Role != "admin" && task.OwnerID != claims.UserID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "not allowed"})
 		return
@@ -108,6 +133,7 @@ func UpdateTask(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
 	if in.Title != nil {
 		task.Title = *in.Title
 	}
@@ -134,12 +160,14 @@ func UpdateTask(c *gin.Context) {
 	}
 
 	if err := config.DB.Save(&task).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not update"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not update task"})
 		return
 	}
+
 	c.JSON(http.StatusOK, task)
 }
 
+// Delete task (admin or owner only)
 func DeleteTask(c *gin.Context) {
 	claims := c.MustGet("claims").(*utils.Claims)
 	id := c.Param("id")
@@ -153,9 +181,12 @@ func DeleteTask(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "not allowed"})
 		return
 	}
+
 	if err := config.DB.Delete(&task).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not delete"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not delete task"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+
+	c.JSON(http.StatusOK, gin.H{"message": "task deleted"})
 }
+
